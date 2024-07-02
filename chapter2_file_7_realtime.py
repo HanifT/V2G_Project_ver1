@@ -5,12 +5,15 @@ from parking import charging_dataframe
 
 
 def real_time_data(list):
+    list = ["P_1091"]
     trip_data = pd.read_csv("data.csv")
     final_dataframes_charging = charging_dataframe(trip_data, 0)
     charging_data = final_dataframes_charging
 
     charging_data = charging_data.drop(columns=["ts_start", "ts_end", "charge_type_count"]).sort_values(by=["vehicle_name", "start_time_local"]).reset_index(drop=True)
     trip_data = trip_data.drop(columns=["ts_start", "ts_end", "charge_type_count"]).sort_values(by=["vehicle_name", "start_time_local"]).reset_index(drop=True)
+    # Fill NaN values in 'start_time_charging' with 'end_time_local'
+    charging_data['charging_speed'].fillna(6.6, inplace=True)
 
     def classify_model(vehicle_model):
         if vehicle_model.startswith('Model S'):
@@ -32,10 +35,13 @@ def real_time_data(list):
     trip_data["next_departure_time"] = pd.to_datetime(trip_data["next_departure_time"])
 
     charging_data = charging_data[charging_data["vehicle_name"].isin(list)]
+
+    charging_data["end_time_local"] = pd.to_datetime(charging_data['end_time_local'])
+    charging_data["next_departure_time"] = pd.to_datetime(charging_data["next_departure_time"]).dt.tz_convert('America/Los_Angeles')
     trip_data = trip_data[trip_data["vehicle_name"].isin(list)]
 
     def calculate_hour_of_year_charging(df):
-        df['hour_of_year_start'] = df['start_time_charging'].apply(lambda x: (x.year - df['start_time_charging'].min().year) * 8760 + (x.dayofyear - 1) * 24 + x.hour)
+        df['hour_of_year_start'] = df['end_time_local'].apply(lambda x: (x.year - df['end_time_local'].min().year) * 8760 + (x.dayofyear - 1) * 24 + x.hour)
         df['hour_of_year_end'] = df['next_departure_time'].apply(lambda x: (x.year - df['next_departure_time'].min().year) * 8760 + (x.dayofyear - 1) * 24 + x.hour)
         return df
 
@@ -44,9 +50,11 @@ def real_time_data(list):
         df['hour_of_year_end'] = df['end_time_local'].apply(lambda x: (x.year - df['end_time_local'].min().year) * 8760 + (x.dayofyear - 1) * 24 + x.hour)
         return df
 
-    # Group charging data by vehicle_name and calculate hour of the year for each group
+    # Group charging data by vehicle_name and apply the function
     charging_data = charging_data.groupby('vehicle_name').apply(calculate_hour_of_year_charging)
-    trip_data = trip_data.groupby("vehicle_name").apply(calculate_hour_of_year_trip)
+
+    # Group trip data by vehicle_name and apply the function
+    trip_data = trip_data.groupby('vehicle_name').apply(calculate_hour_of_year_trip)
 
     # trip_data.loc[~trip_data["energy[charge_type][type]"].isna(), "hour_of_year_end"] -= 1
 
@@ -134,13 +142,14 @@ def real_time_data(list):
             soc_diff = row['SOC_Diff']
             model = row["Model"]
             hour_of_year_start = int(row['hour_of_year_start'])
-            hour_of_year_end = int(row['hour_of_year_end']) + 1
+            hour_of_year_end = int(row['hour_of_year_end'])
 
             num_hours = hour_of_year_end - hour_of_year_start
-            if num_hours == 0:
-                num_hours = 1
+
             if num_hours > 0:
                 num_hours = num_hours + 1
+            elif num_hours == 0:
+                num_hours = 1
 
             SOC_diff_per_hour = soc_diff / num_hours
 
@@ -211,7 +220,7 @@ def real_time_data(list):
         json.dump(merged_dict, json_file)
 
 # %%
-
+#
 # with open("merged_dict.json", "r") as json_file:
 #     merged_dict = json.load(json_file)
 #

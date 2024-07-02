@@ -11,11 +11,10 @@ logging.getLogger('pyomo.core').setLevel(logging.ERROR)
 GHG_data = pd.read_csv("CISO.csv")
 GHG_dict = dict(enumerate(GHG_data.iloc[:, 0]))
 
-# vehicle_list = ["P_1087", "P_1091", "P_1092", "P_1093", "P_1094", "P_1098", "P_1100", 'P_1109', 'P_1111', "P_1112", "P_1123", "P_1125",
-#                 "P_1125a", "P_1127", 'P_1131', 'P_1132', 'P_1135', 'P_1137', "P_1141", "P_1143", 'P_1217', 'P_1253', 'P_1257', 'P_1260',
-#                 'P_1271', 'P_1272', 'P_1279', 'P_1280', 'P_1281', 'P_1285', 'P_1288', 'P_1294', 'P_1295', 'P_1296', 'P_1304', 'P_1307',
-#                 "P_1357", "P_1367", 'P_1375', 'P_1353', 'P_1368', 'P_1371', "P_1376", 'P_1393', "P_1414", 'P_1419', 'P_1421', 'P_1422', 'P_1424', 'P_1427']
-vehicle_list = ['P_1087']
+vehicle_list = ["P_1087", "P_1091", "P_1092", "P_1093", "P_1094", "P_1098", "P_1100", 'P_1109', 'P_1111', "P_1112", "P_1123", "P_1125",
+                "P_1125a", "P_1127", 'P_1131', 'P_1132', 'P_1135', 'P_1137', "P_1141", "P_1143", 'P_1217', 'P_1253', 'P_1257', 'P_1260',
+                'P_1271', 'P_1272', 'P_1279', 'P_1280', 'P_1281', 'P_1285', 'P_1288', 'P_1294', 'P_1295', 'P_1296', 'P_1304', 'P_1307',
+                "P_1357", "P_1367", 'P_1375', 'P_1353', 'P_1368', 'P_1371', "P_1376", 'P_1393', "P_1414", 'P_1419', 'P_1421', 'P_1422', 'P_1424', 'P_1427']
 
 
 real_time_data(vehicle_list)
@@ -32,12 +31,6 @@ with open("merged_dict.json", "r") as json_file:
 with open("combined_price_PGE_average.json", "r") as json_file:
     combined_price_PGE_average = json.load(json_file)
 
-# with open("combined_price_SCE_average.json", "r") as json_file:
-#     combined_price_SCE_average = json.load(json_file)
-#
-# with open("combined_price_SDGE_new_average.json", "r") as json_file:
-#     combined_price_SDGE_new_average = json.load(json_file)
-
 
 tou_prices = tou_price(550, 450, 430, 400)
 ev_rate_prices = ev_rate_price(310, 510, 620, 310, 480, 490)
@@ -53,7 +46,7 @@ max_index = max(max(map(int, inner_dict.keys())) for inner_dict in merged_dict.v
 # %%
 
 
-def create_model_and_export_excel(charging_speed, ghg_cost_per_tonne, x_chr_domain, locs, price):
+def create_model_and_export_excel(charging_speed, ghg_cost_per_tonne, x_chr_domain, locs, price, price_name):
 
     # Create a Pyomo model
     m = ConcreteModel()
@@ -68,13 +61,12 @@ def create_model_and_export_excel(charging_speed, ghg_cost_per_tonne, x_chr_doma
     # Parameters
 
     # Parameters using merged_dict
-    m.CRTP = Param(m.T, initialize=[price[t] for t in list(m.T)[:len(price)]])
-
+    m.CRTP = Param(m.T, initialize={t: price[t] for t in m.T if t in price})
     # Parameters using merged_dict
 
-    m.GHG = Param(m.T, initialize=[GHG_dict[t] for t in list(m.T)[:len(GHG_dict)]])
+    m.GHG = Param(m.T, initialize={t: GHG_dict[t] for t in m.T if t in GHG_dict})
     m.trv_dist = Param(m.V, m.T, initialize=lambda m, v, t: merged_dict.get(v, {}).get(t, {}).get("distance", 0))
-    m.soc_cons = Param(m.V, m.T, initialize=lambda m, v, t: merged_dict.get(v, {}).get(t, {}).get("soc_diff", 0))
+    m.soc_cons = Param(m.V, m.T, initialize=lambda m, v, t: float(merged_dict.get(v, {}).get(t, {}).get("soc_diff", 0)))
     m.SOC_REQ = Param(m.V, m.T, initialize=lambda m, v, t: merged_dict.get(v, {}).get(t, {}).get("soc_need", 0))
     m.fac_chr = Param(m.V, m.T, initialize=lambda m, v, t: merged_dict.get(v, {}).get(t, {}).get("charging_indicator", 0))
     m.lev_chr = Param(m.V, m.T, initialize=lambda m, v, t: merged_dict.get(v, {}).get(t, {}).get("charge_type", "None"))
@@ -88,7 +80,7 @@ def create_model_and_export_excel(charging_speed, ghg_cost_per_tonne, x_chr_doma
 
     # Other parameters (unchanged)
     m.MAX = Param(m.V, m.T, initialize=charging_speed)
-    m.C_THRESHOLD = Param(initialize=10)
+    m.C_THRESHOLD = Param(initialize=1)
     m.eff_chr = Param(initialize=0.95)
     # m.eff_dri = Param(initialize=3.3)
     m.ghg_cost = Param(initialize=ghg_cost_per_tonne)  # $ per gram
@@ -108,6 +100,7 @@ def create_model_and_export_excel(charging_speed, ghg_cost_per_tonne, x_chr_doma
     CHARGE_LEVEL_MAX_POWER = {
         "LEVEL_1": charging_speed,
         "LEVEL_2": charging_speed,
+        "LEVEL_2/1": charging_speed,
         "DC_FAST_Tesla": 150,
         "DC_FAST_Bolt": 50,
         "DC_FAST_REDUCED": 70,  # New entry for reduced speed
@@ -127,20 +120,36 @@ def create_model_and_export_excel(charging_speed, ghg_cost_per_tonne, x_chr_doma
     ################################################################################################################
     ################################################################################################################
 
+    # degradation_parameters = {
+    #     # Battery capacity group: (slope, intercept)
+    #     60: (8.78e-03, 0),
+    #     65: (8.78e-03, 0),
+    #     66: (8.78e-03, 0),
+    #     70: (8.78e-03, 0),
+    #     75: (1.60e-02, 0),
+    #     80: (1.60e-02, 0),
+    #     85: (1.79e-02, 0),
+    #     90: (1.79e-02, 0),
+    #     95: (1.79e-02, 0),
+    #     100: (1.79e-02, 0)
+    #     # Add more groups as needed
+    # }
+
     degradation_parameters = {
         # Battery capacity group: (slope, intercept)
-        60: (8.78e-03, 0),
-        65: (8.78e-03, 0),
-        66: (8.78e-03, 0),
-        70: (8.78e-03, 0),
-        75: (1.60e-02, 0),
-        80: (1.60e-02, 0),
-        85: (1.79e-02, 0),
-        90: (1.79e-02, 0),
-        95: (1.79e-02, 0),
-        100: (1.79e-02, 0)
+        60: (2.15e-02, 0),
+        65: (2.15e-02, 0),
+        66: (2.15e-02, 0),
+        70: (2.15e-02, 0),
+        75: (2.15e-02, 0),
+        80: (2.15e-02, 0),
+        85: (2.15e-02, 0),
+        90: (2.15e-02, 0),
+        95: (2.15e-02, 0),
+        100: (2.15e-02, 0)
         # Add more groups as needed
     }
+
     # Define functions to get slope and intercept based on battery capacity
     # Initialize d_slope and d_intercept using degradation_parameters and bat_cap
 
@@ -162,6 +171,7 @@ def create_model_and_export_excel(charging_speed, ghg_cost_per_tonne, x_chr_doma
     # Constraint: Balance battery state of charge
     ################################################################################################################
     ################################################################################################################
+
     def soc_balance_rule(m, v, t):
         if t == 0:
             # Set initial state of charge to 100% at t=0
@@ -169,8 +179,10 @@ def create_model_and_export_excel(charging_speed, ghg_cost_per_tonne, x_chr_doma
         else:
             # Calculate change in state of charge
             # soc_change = (((m.X_CHR[v, t] * m.eff_chr) / m.bat_cap[v, t]) * 100 - (m.trv_dist[v, t] / (m.bat_cap[v, t] * m.eff_dri[v, t])) * 100)
-            soc_change = (((m.X_CHR[v, t] * m.eff_chr) / m.bat_cap[v, t]) * 100 - (m.soc_cons[v, t]))
-
+            chr_term = ((m.X_CHR[v, t] * m.eff_chr) / m.bat_cap[v, t]) * 100
+            dri_term = m.soc_cons[v, t]
+            soc_change = (chr_term - dri_term)
+            # Debugging prints
 
             # Update the state of charge using the calculated soc_change
             return m.SOC[v, t] == m.SOC[v, t - 1] + soc_change  # Use the numerical index
@@ -205,9 +217,9 @@ def create_model_and_export_excel(charging_speed, ghg_cost_per_tonne, x_chr_doma
     m.X_CHR_Max = Constraint(m.V, m.T, rule=max_parameter_init)
 
     def soc_min_departure_rule(m, v, t):
-        if t == 0 or m.fac_chr[v, t-1] == 1 and m.fac_chr[v, t] == 0:
+        if t == 0 or (m.fac_chr[v, t-1] == 1 and m.fac_chr[v, t] == 0):
             # Beginning of a charging session
-            return m.SOC[v, t] >= m.SOC_REQ[v, t] + 20
+            return m.SOC[v, t] >= m.SOC_REQ[v, t]
         else:
             return Constraint.Skip
 
@@ -227,7 +239,7 @@ def create_model_and_export_excel(charging_speed, ghg_cost_per_tonne, x_chr_doma
             return m.X_CHR[v, t] == 0
         else:
             return Constraint.Skip
-
+    #
     m.X_CHR_Non_Zero = Constraint(m.V, m.T, rule=x_chr_non_zero_rule)
 
     def x_chr_min_rule(m, v, t):
@@ -239,6 +251,7 @@ def create_model_and_export_excel(charging_speed, ghg_cost_per_tonne, x_chr_doma
     m.X_CHR_Min = Constraint(m.V, m.T, rule=x_chr_min_rule)
     ################################################################################################################
     ################################################################################################################
+
     # Battery Degradation
     # Constraint to capture the negative part of X_CHR
     def x_chr_neg_part_rule(m, v, t):
@@ -368,13 +381,11 @@ def create_model_and_export_excel(charging_speed, ghg_cost_per_tonne, x_chr_doma
     # Transpose the DataFrame for better readability
     sum_df = sum_df.T
     # Create ExcelWriter object
-    excel_file_name = ""
-    price_name = next(name for name, value in globals().items() if value is price)
     # Determine the appropriate Excel file name based on x_chr_domain
     if x_chr_domain == NonNegativeReals:
-        excel_file_name = f"4BEV_smart_{charging_speed}g_{ghg_cost_per_tonne}kw_{locs}__{price_name}.xlsx"
+        excel_file_name = f"4BEV_smart_{charging_speed}g_{ghg_cost_per_tonne}kw_{locs}_{price_name}.xlsx"
     else:
-        excel_file_name = f"4BEV_v2g_{charging_speed}g_{ghg_cost_per_tonne}kw_{locs}__{price_name}.xlsx"
+        excel_file_name = f"4BEV_v2g_{charging_speed}g_{ghg_cost_per_tonne}kw_{locs}_{price_name}.xlsx"
     # Create the JSON file name by replacing the .xlsx extension with .json
     json_file_name = excel_file_name.replace('.xlsx', '.json')
 
@@ -412,13 +423,13 @@ def create_model_and_export_excel(charging_speed, ghg_cost_per_tonne, x_chr_doma
 
 
 # %% Run the code for smart charging
-
 # Define the charging speeds and GHG costs
 x_chr_domain = [NonNegativeReals, Reals]
 charging_speeds = [6.6, 12, 19]
-ghg_costs = [50/1000, 191/1000]
+# ghg_costs = [50/1000, 191/1000]
+ghg_costs = [50/1000]
 locations = [["Home"], ["Home", "Work"]]
-prices = [tou_prices, ev_rate_prices, RT_PGE]
+prices = {"TOU": tou_prices, "EV_rate": ev_rate_prices, "RT": RT_PGE}
 
 
 # Iterate over all combinations
@@ -426,7 +437,28 @@ for domain in x_chr_domain:
     for speed in charging_speeds:
         for cost in ghg_costs:
             for loc in locations:
-                for ep in prices:
-                    excel_file, json_file = create_model_and_export_excel(charging_speed=speed, ghg_cost_per_tonne=cost, x_chr_domain=domain, locs=loc, price=ep)
-                    price_name = next(name for name, value in globals().items() if value is ep)
-                    print(f" file '{excel_file}' has been created with charging speed {speed} kW and GHG cost ${cost} per tonne, V2G at{loc}_{price_name}.")
+                for name, ep in prices.items():
+                    # Call the function with correct arguments
+                    excel_file, json_file = create_model_and_export_excel(charging_speed=speed, ghg_cost_per_tonne=cost, x_chr_domain=domain, locs=loc, price=ep, price_name=name)
+                    # Print confirmation message
+                    print(f"File '{excel_file}' has been created with charging speed {speed} kW and GHG cost ${cost} per tonne, V2G at {loc}_{name}.")
+
+
+# %%
+
+# import os
+#
+# # List all files in the directory to check the exact file name
+# directory = '/Users/haniftayarani/V2G_Project/'
+# files = os.listdir(directory)
+# print(files)
+#
+# # Specify the full path to the JSON file
+# json_file = "/Users/haniftayarani/V2G_Project/4BEV_smart_6.6g_0.05kw_['Home']_TOU.json"
+#
+# # Load JSON data into a Python dictionary
+# with open(json_file, 'r') as f:
+#     data = json.load(f)
+#
+# # Convert dictionary to DataFrame
+# df = pd.DataFrame(data)
